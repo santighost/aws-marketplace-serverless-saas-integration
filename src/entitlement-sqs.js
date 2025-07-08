@@ -14,10 +14,14 @@ exports.handler = async (event) => {
     }
 
     if (message.action === 'entitlement-updated') {
+      const customerIdentifier = message['customer-identifier'];
+      const productCode = message['product-code'];
+      const compositeKey = `${productCode}#${customerIdentifier}`;
+
       const entitlementParams = {
-        ProductCode: message['product-code'],
+        ProductCode: productCode,
         Filter: {
-          CUSTOMER_IDENTIFIER: [message['customer-identifier']],
+          CUSTOMER_IDENTIFIER: [customerIdentifier],
         },
       };
 
@@ -31,7 +35,7 @@ exports.handler = async (event) => {
       const dynamoDbParams = {
         TableName: newSubscribersTableName,
         Key: {
-          customerIdentifier: { S: message['customer-identifier'] },
+          "productCode#customerIdentifier": { S: compositeKey },
         },
         UpdateExpression: 'set entitlement = :e, successfully_subscribed = :ss, subscription_expired = :se',
         ExpressionAttributeValues: {

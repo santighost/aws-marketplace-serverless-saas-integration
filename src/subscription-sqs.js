@@ -3,7 +3,6 @@ const { SupportSNSArn: TopicArn, NewSubscribersTableName: newSubscribersTableNam
 const dynamodb = new AWS.DynamoDB({ apiVersion: '2012-08-10', region: aws_region });
 const SNS = new AWS.SNS({ apiVersion: '2010-03-31' });
 
-
 exports.SQSHandler = async (event) => {
   await Promise.all(event.Records.map(async (record) => {
     const { body } = record;
@@ -46,10 +45,14 @@ exports.SQSHandler = async (event) => {
      isFreeTrialTermPresent = message.isFreeTrialTermPresent.toLowerCase() === "true";
     }
 
+    const customerIdentifier = message['customer-identifier'];
+    const productCode = message['product-code'];
+    const compositeKey = `${productCode}#${customerIdentifier}`;
+
     const dynamoDbParams = {
       TableName: newSubscribersTableName,
       Key: {
-        customerIdentifier: { S: message['customer-identifier'] },
+        "productCode#customerIdentifier": { S: compositeKey },
       },
       UpdateExpression: 'set subscription_action = :ac, successfully_subscribed = :ss, subscription_expired = :se, is_free_trial_term_present = :ft',
       ExpressionAttributeValues: {

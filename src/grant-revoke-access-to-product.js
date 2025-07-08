@@ -10,7 +10,6 @@ const logger = winston.createLogger({
   ],
 });
 
-
 exports.dynamodbStreamHandler = async (event, context) => {
   await Promise.all(event.Records.map(async (record) => {
     logger.defaultMeta = { requestId: context.awsRequestId };
@@ -35,7 +34,6 @@ exports.dynamodbStreamHandler = async (event, context) => {
       typeof newImage.is_free_trial_term_present !== "undefined" &&
       (oldImage.successfully_subscribed !== true || typeof oldImage.is_free_trial_term_present === "undefined")
 
-
     const revokeAccess = newImage.subscription_expired === true
       && !oldImage.subscription_expired;
 
@@ -53,15 +51,22 @@ exports.dynamodbStreamHandler = async (event, context) => {
       let message = '';
       let subject = '';
 
+      // Extract product information from the composite key
+      const compositeKey = newImage['productCode#customerIdentifier'];
+      const [productCode, customerIdentifier] = compositeKey.split('#');
+      
+      // Add product information to the notification
+      newImage.productCode = productCode;
+      newImage.customerIdentifier = customerIdentifier;
 
       if (grantAccess) {
-        subject = 'New AWS Marketplace Subscriber';
+        subject = `New AWS Marketplace Subscriber for ${productCode}`;
         message = `subscribe-success: ${JSON.stringify(newImage)}`;
       } else if (revokeAccess) {
-        subject = 'AWS Marketplace customer end of subscription';
+        subject = `AWS Marketplace customer end of subscription for ${productCode}`;
         message = `unsubscribe-success: ${JSON.stringify(newImage)}`;
       } else if (entitlementUpdated) {
-        subject = 'AWS Marketplace customer change of subscription';
+        subject = `AWS Marketplace customer change of subscription for ${productCode}`;
         message = `entitlement-updated: ${JSON.stringify(newImage)}`;
       }
 
@@ -76,7 +81,6 @@ exports.dynamodbStreamHandler = async (event, context) => {
       await SNS.publish(SNSparams).promise();
     }
   }));
-
 
   return {};
 };

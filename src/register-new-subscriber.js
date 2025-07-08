@@ -27,11 +27,11 @@ const setBuyerNotificationHandler = function (contactEmail) {
       Body: {
         Html: {
           Charset: "UTF-8",
-          Data: "<!DOCTYPE html><html><head><title>Welcome!<\/title><\/head><body><h1>Welcome!<\/h1><p>Thanks for purchasing<\/p><p>We\u2019re thrilled to have you on board. Our team is hard at work setting up your account, please expect to hear from a member of our customer success team soon<\/p><\/body><\/html>"
+          Data: "<!DOCTYPE html><html><head><title>Welcome!<\\/title><\\/head><body><h1>Welcome!<\\/h1><p>Thanks for purchasing<\\/p><p>We\\u2019re thrilled to have you on board. Our team is hard at work setting up your account, please expect to hear from a member of our customer success team soon<\\/p><\\/body><\\/html>"
         },
         Text: {
           Charset: "UTF-8",
-          Data: "Welcome! Thanks for purchasing. We’re thrilled to have you on board. Our team is hard at work setting up your account, please expect to hear from a member of our customer success team soon"
+          Data: "Welcome! Thanks for purchasing. We're thrilled to have you on board. Our team is hard at work setting up your account, please expect to hear from a member of our customer success team soon"
         }
       },
 
@@ -44,8 +44,6 @@ const setBuyerNotificationHandler = function (contactEmail) {
   };
 
   return ses.sendEmail(params).promise()
-
-
 };
 
 exports.registerNewSubscriber = async (event) => {
@@ -71,16 +69,20 @@ exports.registerNewSubscriber = async (event) => {
 
       const datetime = new Date().getTime().toString();
 
+      // Create composite key for multi-product support
+      const compositeKey = `${ProductCode}#${CustomerIdentifier}`;
+
       // Write form inputs from ../web/index.html
       const dynamoDbParams = {
         TableName: newSubscribersTableName,
         Item: {
+          "productCode#customerIdentifier": { S: compositeKey },
+          productCode: { S: ProductCode },
+          customerIdentifier: { S: CustomerIdentifier },
           companyName: { S: companyName },
           contactPerson: { S: contactPerson },
           contactPhone: { S: contactPhone },
           contactEmail: { S: contactEmail },
-          customerIdentifier: { S: CustomerIdentifier },
-          productCode: { S: ProductCode },
           customerAWSAccountID: { S: CustomerAWSAccountId },          
           created: { S: datetime },
         },
@@ -106,14 +108,12 @@ exports.registerNewSubscriber = async (event) => {
 
       await setBuyerNotificationHandler(contactEmail);
 
-
-
       return lambdaResponse(200, 'Success! Registration completed. You have purchased an enterprise product that requires some additional setup. A representative from our team will be contacting you within two business days with your account credentials. Please contact Support through our website if you have any questions.');
     } catch (error) {
       console.error(error);
       return lambdaResponse(400, 'Registration data not valid. Please try again, or contact support!');
     }
   } else {
-    return lambdaResponse(400, 'Request no valid');
+    return lambdaResponse(400, 'Request not valid');
   }
 };

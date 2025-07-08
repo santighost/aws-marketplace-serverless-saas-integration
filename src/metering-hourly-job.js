@@ -4,7 +4,6 @@ const dynamodb = new AWS.DynamoDB({ apiVersion: '2012-08-10', region: aws_region
 const sqs = new AWS.SQS({ apiVersion: '2012-11-05', region: aws_region });
 const { SQSMeteringRecordsUrl: QueueUrl, AWSMarketplaceMeteringRecordsTableName: AWSMarketplaceMeteringRecordsTableName } = process.env;
 
-
 async function asyncForEach(array, callback) {
   for (let index = 0; index < array.length; index++) {
     await callback(array[index], index, array)
@@ -16,7 +15,6 @@ const addUpDimensions = (objectArray) => Object.values(objectArray.reduce((accum
     ? (accumulator[currentValue.dimension].value += currentValue.value)
     : accumulator[currentValue.dimension] = { ...currentValue }
   ), accumulator), {}));
-
 
 exports.job = async () => {
   const params = {
@@ -34,15 +32,16 @@ exports.job = async () => {
   const hashMap = {};
 
   items.map((item) => {
-    const { customerIdentifier } = item;
+    const { customerIdentifier, productCode } = item;
+    const compositeKey = `${productCode}#${customerIdentifier}`;
 
-    if (hashMap[customerIdentifier]) {
-      hashMap[customerIdentifier].create_timestamps.push(item.create_timestamp);
-      hashMap[customerIdentifier].dimension_usage = addUpDimensions([...hashMap[customerIdentifier].dimension_usage, ...item.dimension_usage]);
+    if (hashMap[compositeKey]) {
+      hashMap[compositeKey].create_timestamps.push(item.create_timestamp);
+      hashMap[compositeKey].dimension_usage = addUpDimensions([...hashMap[compositeKey].dimension_usage, ...item.dimension_usage]);
     } else {
-      hashMap[customerIdentifier] = item;
-      hashMap[customerIdentifier].create_timestamps = [item.create_timestamp];
-      delete hashMap[customerIdentifier].create_timestamp;
+      hashMap[compositeKey] = item;
+      hashMap[compositeKey].create_timestamps = [item.create_timestamp];
+      delete hashMap[compositeKey].create_timestamp;
     }
   });
 
