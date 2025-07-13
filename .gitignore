@@ -5,3 +5,17 @@ node_modules
 packaged.yaml
 deploy.sh
 *.toml
+
+# Python specific
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.coverage
+.env
+.venv
+venv/
+ENV/
+
+# Keep sample config files
+!test/config/*.toml

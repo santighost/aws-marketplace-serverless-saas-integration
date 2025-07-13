@@ -27,7 +27,7 @@ const setBuyerNotificationHandler = function (contactEmail) {
       Body: {
         Html: {
           Charset: "UTF-8",
-          Data: "<!DOCTYPE html><html><head><title>Welcome!<\\/title><\\/head><body><h1>Welcome!<\\/h1><p>Thanks for purchasing<\\/p><p>We\\u2019re thrilled to have you on board. Our team is hard at work setting up your account, please expect to hear from a member of our customer success team soon<\\/p><\\/body><\\/html>"
+          Data: "<!DOCTYPE html><html><head><title>Welcome!</title></head><body><h1>Welcome!</h1><p>Thanks for purchasing</p><p>We're thrilled to have you on board. Our team is hard at work setting up your account, please expect to hear from a member of our customer success team soon</p></body></html>"
         },
         Text: {
           Charset: "UTF-8",
@@ -64,7 +64,7 @@ exports.registerNewSubscriber = async (event) => {
         .resolveCustomer(resolveCustomerParams)
         .promise();
 
-      // Store new subscriber data in dynamoDb
+      // Extract customer data from resolveCustomer response
       const { CustomerIdentifier, ProductCode, CustomerAWSAccountId } = resolveCustomerResponse;
 
       const datetime = new Date().getTime().toString();
@@ -72,7 +72,7 @@ exports.registerNewSubscriber = async (event) => {
       // Create composite key for multi-product support
       const compositeKey = `${ProductCode}#${CustomerIdentifier}`;
 
-      // Write form inputs from ../web/index.html
+      // Prepare DynamoDB item with subscriber data
       const dynamoDbParams = {
         TableName: newSubscribersTableName,
         Item: {
@@ -88,6 +88,7 @@ exports.registerNewSubscriber = async (event) => {
         },
       };
 
+      // Store new subscriber data in DynamoDB
       await dynamodb.putItem(dynamoDbParams).promise();
 
       // Only for SaaS Contracts, check entitlement

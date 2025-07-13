@@ -1,0 +1,11 @@
+version = 0.1
+
+[default.deploy.parameters]
+stack_name = "mp-saas-test-contracts-with-subscription"
+resolve_s3 = true
+s3_prefix = "mp-saas-test-contracts-with-subscription"
+region = "us-east-1"
+confirm_changeset = true
+capabilities = "CAPABILITY_NAMED_IAM"
+parameter_overrides = "WebsiteS3BucketName=\"mp-saas-test-contracts-with-subscription-bucket\" NewSubscribersTableName=\"AWSMarketplaceSubscribers-test-contracts-with-subscription\" AWSMarketplaceMeteringRecordsTableName=\"AWSMarketplaceMeteringRecords-test-contracts-with-subscription\" TypeOfSaaSListing=\"contracts_with_subscription\" SNSAccountID=\"287250355862\" SNSRegion=\"us-east-1\" ProductId=\"\" MarketplaceTechAdminEmail=\"\" MarketplaceSellerEmail=\"\" CreateCrossAccountRole=\"false\" CrossAccountId=\"\" CrossAccountRoleName=\"\" CreateRegistrationWebPage=\"true\" UpdateFulfillmentURL=\"true\""
+image_repositories = []
