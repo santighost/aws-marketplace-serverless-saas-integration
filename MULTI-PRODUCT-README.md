@@ -215,6 +215,28 @@ The database and Lambda functions will automatically handle the new product's da
    - Explain that it's set to `false` by default as a safety measure for existing products
    - Recommend setting it to `true` for new products or development environments to streamline setup
 
+### Documentation Consolidation
+
+The "Serverless SaaS API Integration Deployment Guide" in the repository appears to be outdated and inconsistent with the current implementation. Consider:
+
+1. **Removing the separate deployment guide** and consolidating all documentation in the main README.md file
+2. **Updating the README.md** with comprehensive deployment instructions that reflect the current implementation
+3. **Adding a section on multi-product support** in the main README.md that references this document for detailed information
+4. **Creating a migration guide** for users upgrading from the single-product version to the multi-product version
+
+Consolidating documentation would reduce maintenance overhead and ensure users have access to accurate, up-to-date information in a single location.
+
+### Auto-Renewal Handling
+
+The current implementation processes subscription and entitlement notifications but doesn't specifically distinguish auto-renewals from other types of updates. For a more comprehensive solution, consider:
+
+1. **Enhanced Renewal Detection**: Add logic to detect when an entitlement update is due to a renewal (by comparing expiration dates with previous records)
+2. **Renewal Tracking**: Add specific fields in the DynamoDB schema to track renewal status and history
+3. **Renewal Notifications**: Implement specific notification logic for renewals to alert customers or internal teams
+4. **Renewal Analytics**: Add tracking for renewal rates and patterns across products
+
+Auto-renewals are currently handled as regular subscription or entitlement updates through the existing SNS notification handlers (`subscription-sqs.js` and `entitlement-sqs.js`). For most use cases, this basic handling is sufficient, but more sophisticated renewal management might be beneficial for products with complex pricing or customer lifecycle management.tup
+
 ### Automatic Fulfillment URL Update
 
 The multi-product solution includes a feature to automatically update the fulfillment URL in AWS Marketplace. This is controlled by the `UpdateFulfillmentURL` parameter:
@@ -257,3 +279,34 @@ This information is stored in the DynamoDB table along with the AWS Marketplace 
    - When adding additional products, explain that each product needs its fulfillment URL updated
    - Since the `UpdateFulfillmentURL` parameter only works for the initial product, document how to update fulfillment URLs for additional products
    - Consider adding a script or CloudFormation custom resource to automate this process for multiple products
+
+4. **How to add second Product**:
+
+   We've explored two main approaches for adding additional products after the initial deployment:
+
+   **Option 1: Child Stack Approach**
+   - Deploy a separate CloudFormation stack for each additional product
+   - The child stack would:
+     - Create SNS subscriptions for the new product
+     - Update the fulfillment URL in AWS Marketplace
+     - Reference existing resources (DynamoDB tables, Lambda functions) from the main stack
+   - This approach provides clear separation between products and makes it easy to add/remove individual products
+
+   **Option 2: Product Configuration Table Approach**
+   - Add a Product Configuration Table to store product-specific settings
+   - Create a router Lambda function to direct customers to product-specific landing pages
+   - Store fulfillment URLs and other product-specific settings in the table
+   - This approach provides more flexibility for product-specific configurations
+
+   **Option 3: Separate Landing Pages**
+   - Deploy a separate static website for each product
+   - Create a CloudFront distribution for each product
+   - Update the fulfillment URL to point to the product-specific CloudFront distribution
+   - This approach allows for completely different user experiences per product
+
+   **Recommendation**
+   For most users, Option 1 (Child Stack) provides the best balance of simplicity and flexibility. It allows adding new products without modifying the main stack, while still sharing the backend infrastructure.
+
+   For users with more complex requirements (different landing pages, product-specific settings), Option 2 or 3 may be more appropriate.
+
+   We'll provide templates for all three approaches in future updates.
