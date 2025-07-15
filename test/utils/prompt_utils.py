@@ -228,4 +228,72 @@ def prompt_for_test_parameters(test_name, config_name, config_dir, stack_outputs
             "marketplace_token": marketplace_token if marketplace_token else None
         }
     
+    elif test_name == "entitlement":
+        print(f"Configuring parameters for entitlement test:")
+        
+        # Prompt for customer identifier
+        customer_id = prompt_for_optional_parameter("Specify customer identifier (leave empty to create a test customer)", "")
+        
+        # Prompt for product code
+        product_code = None
+        if stack_outputs and "ProductCode" in stack_outputs:
+            product_code = stack_outputs["ProductCode"]
+        product_code = prompt_for_parameter("Specify product code", product_code)
+        
+        return {
+            "customer_id": customer_id if customer_id else None,
+            "product_code": product_code if product_code else None
+        }
+    
+    elif test_name == "subscription":
+        print(f"Configuring parameters for subscription test:")
+        
+        # Prompt for customer identifier
+        customer_id = prompt_for_optional_parameter("Specify customer identifier (leave empty to create a test customer)", "")
+        
+        # Prompt for product code
+        product_code = None
+        if stack_outputs and "ProductCode" in stack_outputs:
+            product_code = stack_outputs["ProductCode"]
+        product_code = prompt_for_parameter("Specify product code", product_code)
+        
+        return {
+            "customer_id": customer_id if customer_id else None,
+            "product_code": product_code if product_code else None
+        }
+    
+    elif test_name == "metering":
+        print(f"Configuring parameters for metering test:")
+        
+        # Prompt for customer identifier
+        customer_id = prompt_for_optional_parameter("Specify customer identifier (leave empty to create a test customer)", "")
+        
+        # Prompt for product code
+        product_code = None
+        if stack_outputs and "ProductCode" in stack_outputs:
+            product_code = stack_outputs["ProductCode"]
+        product_code = prompt_for_parameter("Specify product code", product_code)
+        
+        return {
+            "customer_id": customer_id if customer_id else None,
+            "product_code": product_code if product_code else None
+        }
+    
+    elif test_name == "grant_revoke":
+        print(f"Configuring parameters for grant/revoke access test:")
+        
+        # Prompt for customer identifier
+        customer_id = prompt_for_optional_parameter("Specify customer identifier (leave empty to create a test customer)", "")
+        
+        # Prompt for product code
+        product_code = None
+        if stack_outputs and "ProductCode" in stack_outputs:
+            product_code = stack_outputs["ProductCode"]
+        product_code = prompt_for_parameter("Specify product code", product_code)
+        
+        return {
+            "customer_id": customer_id if customer_id else None,
+            "product_code": product_code if product_code else None
+        }
+    
     return {}

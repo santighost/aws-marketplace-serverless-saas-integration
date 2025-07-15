@@ -54,6 +54,8 @@ def parse_args():
                         help="Email to use for registration")
     parser.add_argument("--product-code", 
                         help="Product code to use (overrides the one from stack outputs)")
+    parser.add_argument("--customer-id", 
+                        help="Customer identifier to use for testing (if not provided, a new test customer will be created)")
     return parser.parse_args()
 
 def load_test_module(test_name):
@@ -145,7 +147,7 @@ def deploy_stack(config_name, config_dir):
     
     return outputs
 
-def run_tests(config_name, stack_outputs, selected_tests=None, marketplace_token=None, debug=False, email=None, product_code=None):
+def run_tests(config_name, stack_outputs, selected_tests=None, marketplace_token=None, debug=False, email=None, product_code=None, customer_id=None):
     """Run the specified tests"""
     config = TEST_CONFIGS[config_name]
     tests_to_run = selected_tests if selected_tests else config["tests"]
@@ -162,7 +164,7 @@ def run_tests(config_name, stack_outputs, selected_tests=None, marketplace_token
                 if test == "registration" and marketplace_token:
                     results[test] = test_module.run_test(stack_outputs, marketplace_token, debug, config_name, email, product_code)
                 else:
-                    results[test] = test_module.run_test(stack_outputs, debug=debug, config_name=config_name, registration_email=email, override_product_code=product_code)
+                    results[test] = test_module.run_test(stack_outputs, debug=debug, config_name=config_name, registration_email=email, override_product_code=product_code, customer_id=customer_id)
             except Exception as e:
                 print(f"ERROR: Test {test} failed with exception: {e}")
                 results[test] = False
@@ -222,8 +224,16 @@ def main():
                 if test_params["registration"].get("marketplace_token") and not args.marketplace_token:
                     args.marketplace_token = test_params["registration"]["marketplace_token"]
             
+            # Override customer_id for all tests that need it
+            for test_type in ["entitlement", "subscription", "metering", "grant_revoke"]:
+                if test_type in test_params and test_params[test_type]:
+                    if test_params[test_type].get("customer_id") and not args.customer_id:
+                        args.customer_id = test_params[test_type]["customer_id"]
+                    if test_params[test_type].get("product_code") and not args.product_code:
+                        args.product_code = test_params[test_type]["product_code"]
+            
             # Run tests
-            test_results = run_tests(args.config, stack_outputs, tests_to_run, args.marketplace_token, args.debug, args.email, args.product_code)
+            test_results = run_tests(args.config, stack_outputs, tests_to_run, args.marketplace_token, args.debug, args.email, args.product_code, args.customer_id)
             
             # Print results
             print("\n=== Test Results ===")

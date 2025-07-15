@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Test case for entitlement flow
+Test case for subscription flow
 """
 
 import boto3
@@ -15,7 +15,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from utils import aws_utils, data_generators
 
 def run_test(stack_outputs, debug=False, config_name="contracts_with_subscription", registration_email=None, override_product_code=None, customer_id=None):
-    """Test entitlement flow
+    """Test subscription flow
     
     Args:
         stack_outputs: CloudFormation stack outputs
@@ -25,25 +25,25 @@ def run_test(stack_outputs, debug=False, config_name="contracts_with_subscriptio
         override_product_code: Product code to use (overrides the one from stack outputs)
         customer_id: Customer identifier to use for testing (if None, a new test customer will be created)
     """
-    print("\nTesting entitlement flow...")
+    print("\nTesting subscription flow...")
     
     # This test requires:
     # 1. A customer record in DynamoDB
-    # 2. An entitlement SQS queue
-    # 3. Simulating an entitlement notification
+    # 2. A subscription SQS queue
+    # 3. Simulating a subscription notification
     
-    # Check if this is a contracts-based deployment based on the config name
-    if config_name not in ["contracts", "contracts_with_subscription"]:
-        print(f"Skipping entitlement test - not a contracts-based deployment ({config_name})")
+    # Check if this is a subscription-based deployment based on the config name
+    if config_name not in ["subscriptions", "contracts_with_subscription"]:
+        print(f"Skipping subscription test - not a subscription-based deployment ({config_name})")
         return None
     
-    print(f"This is a contracts-based deployment ({config_name})")
+    print(f"This is a subscription-based deployment ({config_name})")
     
     # Get the stack name
     stack_name = f"mp-saas-test-{config_name.replace('_', '-')}"
     print(f"Stack name: {stack_name}")
     
-    # Find the entitlement SQS queue
+    # Find the subscription SQS queue
     try:
         # List all SQS queues
         sqs = boto3.client('sqs')
@@ -53,27 +53,27 @@ def run_test(stack_outputs, debug=False, config_name="contracts_with_subscriptio
             print("No SQS queues found")
             return None
         
-        # Find a queue with 'Entitlement' in the name and the stack name
-        entitlement_queue_url = None
+        # Find a queue with 'Subscription' in the name and the stack name
+        subscription_queue_url = None
         for queue_url in response['QueueUrls']:
             # Print the queue URL for debugging
             if debug:
                 print(f"Checking queue: {queue_url}")
             
-            # The queue URL contains the stack name and 'EntitlementSQSQueue'
-            if stack_name.lower() in queue_url.lower() and 'EntitlementSQSQueue'.lower() in queue_url.lower():
-                entitlement_queue_url = queue_url
-                print(f"Found entitlement queue: {entitlement_queue_url}")
+            # The queue URL contains the stack name and 'SubscriptionSQSHandler'
+            if stack_name.lower() in queue_url.lower() and 'subscription' in queue_url.lower():
+                subscription_queue_url = queue_url
+                print(f"Found subscription queue: {subscription_queue_url}")
                 break
         
-        if not entitlement_queue_url:
-            print("Could not find entitlement queue")
+        if not subscription_queue_url:
+            print("Could not find subscription queue")
             print("Available queues:")
             for queue_url in response['QueueUrls']:
                 print(f"  {queue_url}")
             return None
     except Exception as e:
-        print(f"Error finding entitlement queue: {e}")
+        print(f"Error finding subscription queue: {e}")
         return None
     
     # Get the subscribers table name
@@ -134,13 +134,13 @@ def run_test(stack_outputs, debug=False, config_name="contracts_with_subscriptio
     
     # For real customers, use SQS. For test customers, use direct DB update.
     if not is_test_customer:
-        print("\nUsing real customer - sending entitlement notification to SQS queue...")
+        print("\nUsing real customer - sending subscription notification to SQS queue...")
         
-        # Generate an entitlement notification
-        entitlement_notification = {
+        # Generate a subscription notification
+        subscription_notification = {
             "Type": "Notification",
             "Message": json.dumps({
-                "action": "entitlement-updated",
+                "action": "subscribe-success",
                 "customer-identifier": customer_id,
                 "product-code": product_code
             })
@@ -148,51 +148,36 @@ def run_test(stack_outputs, debug=False, config_name="contracts_with_subscriptio
         
         # Send the notification to the SQS queue
         try:
-            print(f"Sending entitlement notification to SQS queue: {entitlement_queue_url}")
+            print(f"Sending subscription notification to SQS queue: {subscription_queue_url}")
             if debug:
-                print(f"Notification: {json.dumps(entitlement_notification, indent=2)}")
+                print(f"Notification: {json.dumps(subscription_notification, indent=2)}")
                 
             response = sqs.send_message(
-                QueueUrl=entitlement_queue_url,
-                MessageBody=json.dumps(entitlement_notification)
+                QueueUrl=subscription_queue_url,
+                MessageBody=json.dumps(subscription_notification)
             )
             
             if debug:
                 print(f"SQS response: {json.dumps(response, default=str)}")
                 
-            print("Entitlement notification sent successfully")
+            print("Subscription notification sent successfully")
             
-            # Wait for the entitlement to be processed
-            print("Waiting for entitlement to be processed...")
+            # Wait for the subscription to be processed
+            print("Waiting for subscription to be processed...")
             time.sleep(5)  # Wait 5 seconds
         except Exception as e:
-            print(f"ERROR: Failed to send entitlement notification: {e}")
+            print(f"ERROR: Failed to send subscription notification: {e}")
             print("Please fix the error and try again.")
             return False
     else:
-        print("\nUsing test customer - simulating entitlement update...")
-        
-        # Create entitlement data
-        expiration_date = (datetime.now() + timedelta(days=365)).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
-        entitlement_data = {
-            "Entitlements": [
-                {
-                    "ProductCode": product_code,
-                    "Dimension": "dimension_1_id",
-                    "CustomerIdentifier": customer_id,
-                    "Value": {"IntegerValue": 1},
-                    "ExpirationDate": expiration_date
-                }
-            ]
-        }
+        print("\nUsing test customer - simulating subscription update...")
         
         # Update the DynamoDB record
         try:
             update_response = table.update_item(
                 Key={"productCode#customerIdentifier": f"{product_code}#{customer_id}"},
-                UpdateExpression="set entitlement = :e, successfully_subscribed = :ss, subscription_expired = :se",
+                UpdateExpression="set successfully_subscribed = :ss, subscription_expired = :se",
                 ExpressionAttributeValues={
-                    ":e": json.dumps(entitlement_data),
                     ":ss": True,
                     ":se": False
                 },
@@ -202,14 +187,14 @@ def run_test(stack_outputs, debug=False, config_name="contracts_with_subscriptio
             if debug:
                 print(f"Update response: {json.dumps(update_response, default=str)}")
                 
-            print("DynamoDB record updated successfully with entitlement information")
+            print("DynamoDB record updated successfully with subscription information")
         except Exception as e:
             print(f"ERROR: Failed to update DynamoDB record: {e}")
             return False
     
-    # Verify the customer record was updated with entitlement information
+    # Verify the customer record was updated with subscription information
     try:
-        print(f"Checking for entitlement updates in DynamoDB for customer: {customer_id}")
+        print(f"Checking for subscription updates in DynamoDB for customer: {customer_id}")
         response = table.get_item(Key={"productCode#customerIdentifier": f"{product_code}#{customer_id}"})
         
         if "Item" not in response:
@@ -221,39 +206,28 @@ def run_test(stack_outputs, debug=False, config_name="contracts_with_subscriptio
         if debug:
             print(f"Customer record: {json.dumps(item, default=str)}")
         
-        # Check if the entitlement field was added
-        if "entitlement" not in item:
-            print("ERROR: Entitlement field not found in customer record")
-            return False
-        
         # Check if successfully_subscribed was set to true
         if item.get("successfully_subscribed") != True:
             print("ERROR: successfully_subscribed not set to true")
             return False
         
-        # Parse the entitlement JSON
-        entitlement = json.loads(item["entitlement"])
-        
-        if debug:
-            print(f"Entitlement data: {json.dumps(entitlement, indent=2)}")
-        
-        # Check if the entitlement contains the expected fields
-        if "Entitlements" not in entitlement:
-            print("ERROR: Entitlements field not found in entitlement data")
+        # Check if subscription_expired was set to false
+        if item.get("subscription_expired") != False:
+            print("ERROR: subscription_expired not set to false")
             return False
         
         print("\n=== Test Summary ===")
         print("✅ Customer record verified: PASS")
         if not is_test_customer:
-            print("✅ Entitlement notification sent to SQS: PASS")
-            print("✅ Entitlement processed by Lambda: PASS")
+            print("✅ Subscription notification sent to SQS: PASS")
+            print("✅ Subscription processed by Lambda: PASS")
         else:
-            print("✅ Entitlement data simulated: PASS")
+            print("✅ Subscription data simulated: PASS")
         print("✅ DynamoDB record updated: PASS")
-        print("✅ Entitlement data verified: PASS")
-        print("\nTest Result: PASS - Successfully verified entitlement flow")
+        print("✅ Subscription data verified: PASS")
+        print("\nTest Result: PASS - Successfully verified subscription flow")
         
         return True
     except Exception as e:
-        print(f"ERROR: Failed to verify entitlement: {e}")
+        print(f"ERROR: Failed to verify subscription: {e}")
         return False

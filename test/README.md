@@ -1,160 +1,119 @@
-# AWS Marketplace Serverless SaaS Integration Test Framework
+# AWS Marketplace SaaS Integration Tests
 
-This directory contains a test framework for the AWS Marketplace Serverless SaaS Integration solution.
+This directory contains tests for the AWS Marketplace Serverless SaaS Integration. The tests are designed to verify the functionality of the integration with AWS Marketplace.
 
-## Setup
+## Test Framework
 
-It's recommended to use a virtual environment to isolate dependencies:
+The test framework is built using Python and provides a way to test the various components of the AWS Marketplace SaaS Integration:
 
-```bash
-# Create a virtual environment
-python -m venv venv
-
-# Activate the virtual environment
-# On macOS/Linux:
-source venv/bin/activate
-# On Windows:
-# venv\Scripts\activate
-
-# Install the required Python packages
-pip install -r requirements.txt
-```
-
-When you're done, you can deactivate the virtual environment:
-
-```bash
-deactivate
-```
+- **Registration**: Tests the customer registration flow
+- **Entitlement**: Tests the entitlement flow for contract-based products
+- **Subscription**: Tests the subscription flow for subscription-based products
+- **Metering**: Tests the metering flow for usage-based billing
+- **Grant/Revoke Access**: Tests the ability to grant and revoke access to customers
 
 ## Running Tests
 
-The main script is `run_tests.py`, which can be used to deploy stacks and run tests.
-
-### Basic Usage
-
-Make sure your virtual environment is activated, then run. The script will prompt you for any required parameters:
+To run the tests, use the `run_tests.py` script:
 
 ```bash
-# Deploy the stack without running tests
-python run_tests.py --config contracts_with_subscription
-
-# Deploy the stack and run all tests for the configuration
-python run_tests.py --config contracts_with_subscription --tests all
-
-# Deploy the stack and run only the registration test
-python run_tests.py --config contracts --tests registration
-
-# Test registration with a real AWS Marketplace token
-python run_tests.py --config contracts_with_subscription --tests registration --marketplace-token "your-token-here"
-
-# Test with debug output enabled
-python run_tests.py --config contracts_with_subscription --tests registration --marketplace-token "your-token-here" --debug
-
-# Test with custom email and product code
-python run_tests.py --config contracts_with_subscription --tests registration --marketplace-token "your-token-here" --email "customer@example.com" --product-code "your-product-code"
-
-# Skip deployment and run tests on existing stack
-python run_tests.py --skip-deploy --config contracts_with_subscription --tests registration
-
-# Clean up resources after tests
-python run_tests.py --config subscriptions --cleanup
+python run_tests.py [options]
 ```
 
-### Running from Outside the Test Directory
+### Options
 
-You can also run the script from the project root directory by specifying the path to the config directory:
-
-```bash
-# From the project root
-python test/run_tests.py --config contracts_with_subscription --config-dir test/config
-```
-
-### Command Line Arguments
-
-- `--config`: Test configuration to use (contracts, subscriptions, contracts_with_subscription)
-- `--skip-deploy`: Skip deployment and use existing stack
-- `--tests`: Specific tests to run. If not specified, only deployment will be performed. Use 'all' to run all tests for the config.
+- `--config`: Choose the configuration to test (contracts, subscriptions, contracts_with_subscription)
+- `--skip-deploy`: Skip deployment and use an existing stack
+- `--tests`: Specify which tests to run (e.g., registration, entitlement, subscription, metering, grant_revoke)
 - `--cleanup`: Clean up resources after tests
-- `--config-dir`: Directory containing the SAM config files (default: test/config)
-- `--marketplace-token`: AWS Marketplace registration token for testing real registration
-- `--debug`: Enable detailed debug output for API calls and responses
-- `--email`: Email to use for registration (if not provided, you'll be prompted)
+- `--debug`: Enable debug output
+- `--email`: Email to use for registration
 - `--product-code`: Product code to use (overrides the one from stack outputs)
+- `--customer-id`: Customer identifier to use for testing (if not provided, a new test customer will be created)
+- `--marketplace-token`: AWS Marketplace registration token for testing real registration
 
-### Interactive Prompting
+### Examples
 
-The script will prompt you for parameters in two stages:
-
-1. **Deployment Parameters** (when not using `--skip-deploy`):
-   - Seller email (MarketplaceSellerEmail)
-   - Tech admin email (MarketplaceTechAdminEmail)
-   - Product ID (ProductId) - This is the AWS Marketplace listing ID (e.g., prod-vc7pjbuqesi2q)
-
-2. **Test-Specific Parameters** (when running tests):
-   - For registration test:
-     - Customer email (used for registration)
-     - AWS Marketplace token (optional, for testing real registration)
-     - Product code (defaults to the one from stack outputs)
-
-### Product ID vs Product Code
-
-It's important to understand the difference between Product ID and Product Code:
-
-- **Product ID** (e.g., `prod-vc7pjbuqesi2q`):
-  - Used for AWS Marketplace listing management
-  - Used in SAM deployment as the `ProductId` parameter
-  - Format typically starts with `prod-`
-
-- **Product Code** (e.g., `aqofzdc9lpybyqjl1ys98gw1g`):
-  - Returned by the `resolveCustomer` API when a customer subscribes
-  - Used in DynamoDB composite keys: `productCode#customerIdentifier`
-  - Used in AWS Marketplace API calls
-
-When testing with a real token, the Product Code from the `resolveCustomer` API response will be used, regardless of what you specify in the test parameters.
-
-## Adding New Tests
-
-To add a new test:
-
-1. Create a new file in the `test_cases` directory, e.g., `test_new_feature.py`
-2. Implement a `run_test(stack_outputs)` function that returns True (pass), False (fail), or None (not implemented)
-3. Add the test to the appropriate configuration in `run_tests.py`
-
-## Directory Structure
-
-- `config/`: SAM configuration files for different test scenarios
-- `test_cases/`: Individual test modules
-- `utils/`: Utility functions
-- `run_tests.py`: Main test runner script
-- `requirements.txt`: Python package dependencies
-- `venv/`: Virtual environment (created during setup)
-
-### Testing with a Real AWS Marketplace Token
-
-You can test the registration flow with a real AWS Marketplace token. This token is provided when a customer subscribes to your product.
-
-To test with a real token:
-
+Deploy and run all tests for the contracts_with_subscription configuration:
 ```bash
-# Using the main test runner
-python run_tests.py --skip-deploy --config contracts_with_subscription --tests registration --marketplace-token "your-token-here"
-
-# Or run the registration test directly
-python test_cases/test_registration.py --token "your-token-here" --stack-name mp-saas-test-contracts-with-subscription
+python run_tests.py --config contracts_with_subscription --tests all
 ```
 
-The test will:
-1. Call the registration API with the token
-2. Submit customer information
-3. Verify that a customer record is created in DynamoDB with the multi-product format (using composite key)
+Run only the entitlement test on an existing stack:
+```bash
+python run_tests.py --skip-deploy --config contracts_with_subscription --tests entitlement
+```
 
-## Customizing Tests
+Run the metering test with a specific customer ID:
+```bash
+python run_tests.py --skip-deploy --config contracts_with_subscription --tests metering --customer-id YOUR_CUSTOMER_ID
+```
 
-If you need to modify the test configurations:
+## Test Cases
 
-1. Edit the appropriate file in the `config/` directory:
-   - `samconfig.contracts.toml` - For SaaS contracts only
-   - `samconfig.subscriptions.toml` - For SaaS subscriptions only
-   - `samconfig.contracts_with_subscription.toml` - For contracts with subscription model
+### Registration Test
 
-2. Update the stack name, S3 bucket name, and other parameters as needed
+Tests the customer registration flow:
+- Creates a new customer record in DynamoDB
+- Verifies that the customer record was created correctly
+
+### Entitlement Test
+
+Tests the entitlement flow for contract-based products:
+- Creates a new customer record or uses an existing one
+- Sends an entitlement notification to the SQS queue (for real customers)
+- Simulates an entitlement update (for test customers)
+- Verifies that the customer record was updated with entitlement information
+
+### Subscription Test
+
+Tests the subscription flow for subscription-based products:
+- Creates a new customer record or uses an existing one
+- Sends a subscription notification to the SQS queue (for real customers)
+- Simulates a subscription update (for test customers)
+- Verifies that the customer record was updated with subscription information
+
+### Metering Test
+
+Tests the metering flow for usage-based billing:
+- Creates a new customer record or uses an existing one
+- Creates a metering record in the metering records table
+- For real customers, tries to get dimensions from existing entitlements
+- Invokes the metering hourly job Lambda function
+- Verifies that the metering record was processed
+
+### Grant/Revoke Access Test
+
+Tests the ability to grant and revoke access to customers:
+- Creates a new customer record or uses an existing one
+- Tests granting access by setting `successfully_subscribed` to `true` and `subscription_expired` to `false`
+- Verifies that access was granted
+- Tests revoking access by setting `subscription_expired` to `true`
+- Verifies that access was revoked
+- For real customers, restores the original state
+
+## Testing with Real Customers
+
+When testing with real customers (by providing a `--customer-id`), the tests will:
+1. Use the existing customer record from DynamoDB
+2. Use real SQS queues and Lambda functions
+3. For metering, try to get dimensions from existing entitlements
+4. For grant/revoke access, restore the original state after the test
+
+## Testing with Test Customers
+
+When testing with test customers (no `--customer-id` provided), the tests will:
+1. Create a new test customer with a random ID
+2. Use simulated updates for entitlements and subscriptions
+3. Use default test dimensions for metering
+4. Not restore the original state after grant/revoke access tests
+
+## Configuration
+
+The test framework supports three configurations:
+
+1. **contracts**: For testing contract-based products
+2. **subscriptions**: For testing subscription-based products
+3. **contracts_with_subscription**: For testing products with both contracts and subscriptions
+
+Each configuration has its own SAM template and set of tests.

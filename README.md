@@ -149,6 +149,18 @@ After the record is submitted to AWS Marketplace BatchMeterUsage API, it will be
 }
 ```
 
+## Testing the Integration
+
+The repository includes a comprehensive testing framework to verify the functionality of the AWS Marketplace SaaS Integration. The tests cover all aspects of the integration:
+
+- **Registration**: Tests the customer registration flow
+- **Entitlement**: Tests the entitlement flow for contract-based products
+- **Subscription**: Tests the subscription flow for subscription-based products
+- **Metering**: Tests the metering flow for usage-based billing
+- **Grant/Revoke Access**: Tests the ability to grant and revoke access to customers
+
+For more information on running the tests, see the [test README](test/README.md).
+
 ## Deploying the sample application using the SAM CLI
 
 The Serverless Application Model Command Line Interface (SAM CLI) is an extension of the AWS CLI that adds functionality for building and testing Lambda applications. To learn more about SAM, visit the [AWS SAM developer guide](https://docs.aws.amazon.com/serverless-application-model/latest/developerguide/serverless-sam-cli-install.html).

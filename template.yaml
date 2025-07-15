@@ -105,10 +105,10 @@ Conditions:
       - !Equals [!Ref TypeOfSaaSListing, contracts_with_subscription]
       - !Equals [!Ref TypeOfSaaSListing, subscriptions]
 
-  CreateWeb: !Equals [!Ref CreateRegistrationWebPage, "true"]
+  CreateWeb: !Equals [!Ref CreateRegistrationWebPage, true]
   Buyernotificationemail: !Not [!Equals [!Ref MarketplaceSellerEmail, ""]]
-  CreateCrossAccount: !Equals [!Ref CreateCrossAccountRole, "true"]
-  UpdateFulfillment: !Equals [!Ref UpdateFulfillmentURL, "true"]
+  CreateCrossAccount: !Equals [!Ref CreateCrossAccountRole, true]
+  UpdateFulfillment: !Equals [!Ref UpdateFulfillmentURL, true]
 
 Resources:
   ServerlessApi:
