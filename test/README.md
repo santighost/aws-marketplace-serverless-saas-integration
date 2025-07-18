@@ -49,6 +49,17 @@ Run the metering test with a specific customer ID:
 python run_tests.py --skip-deploy --config contracts_with_subscription --tests metering --customer-id YOUR_CUSTOMER_ID
 ```
 
+Run all tests in a chained flow that passes data between tests:
+```bash
+python run_tests.py --config contracts_with_subscription --tests all
+```
+
+When using `--tests all`, the tests automatically run in chained mode, which:
+1. Starts with the registration test
+2. Uses the customer ID from registration for subsequent tests
+3. Stops if any test fails
+4. Provides a detailed summary of all test results
+
 ## Test Cases
 
 ### Registration Test
@@ -117,3 +128,28 @@ The test framework supports three configurations:
 3. **contracts_with_subscription**: For testing products with both contracts and subscriptions
 
 Each configuration has its own SAM template and set of tests.
+
+## Dimension Mappings
+
+For metering tests with real customers, the test framework uses a dimension mapping configuration to map entitlement dimensions to metering dimensions. This is necessary because AWS Marketplace often uses different dimension identifiers for entitlements and metering.
+
+The mapping is defined in `config/dimension_mappings.json`:
+
+```json
+{
+  "dimension_mappings": {
+    "dimension_1_id": "metered_1_id",
+    "dimension_2_id": "metered_2_id",
+    "dimension_3_id": "metered_3_id"
+  }
+}
+```
+
+When running metering tests with real customers, the test will:
+1. Extract the entitlement dimensions from the customer record
+2. Map these dimensions to metering dimensions using the configuration
+3. Use the mapped dimensions for metering
+
+If no mapping is found, the test will fall back to using "metered_1_id" as the default metering dimension.
+
+You should update this mapping to match your AWS Marketplace product's configuration.

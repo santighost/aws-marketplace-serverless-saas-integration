@@ -29,7 +29,7 @@ TEST_CONFIGS = {
     "contracts_with_subscription": {
         "config_file": "config/samconfig.contracts_with_subscription.toml",
         "stack_name": "mp-saas-test-contracts-with-subscription",
-        "tests": ["registration", "entitlement", "subscription", "metering", "grant_revoke"]
+        "tests": ["registration", "entitlement", "subscription", "metering", "grant_revoke", "multi_product"]
     }
 }
 
@@ -42,6 +42,7 @@ def parse_args():
                         help="Skip deployment and use existing stack")
     parser.add_argument("--tests", nargs="+", 
                         help="Specific tests to run. If not specified, only deployment will be performed. Use 'all' to run all tests for the config.")
+    # Removed --comprehensive flag as it's now automatically enabled with --tests all
     parser.add_argument("--cleanup", action="store_true",
                         help="Clean up resources after tests")
     parser.add_argument("--config-dir", default=os.path.join(os.path.dirname(os.path.abspath(__file__)), "config"),
@@ -56,6 +57,8 @@ def parse_args():
                         help="Product code to use (overrides the one from stack outputs)")
     parser.add_argument("--customer-id", 
                         help="Customer identifier to use for testing (if not provided, a new test customer will be created)")
+    parser.add_argument("--second-product-code", 
+                        help="Secondary product code for multi-product testing")
     return parser.parse_args()
 
 def load_test_module(test_name):
@@ -147,12 +150,30 @@ def deploy_stack(config_name, config_dir):
     
     return outputs
 
-def run_tests(config_name, stack_outputs, selected_tests=None, marketplace_token=None, debug=False, email=None, product_code=None, customer_id=None):
-    """Run the specified tests"""
+def run_tests(config_name, stack_outputs, selected_tests=None, marketplace_token=None, debug=False, email=None, product_code=None, customer_id=None, chained_mode=False):
+    """Run the specified tests
+    
+    Args:
+        config_name: Name of the configuration to test
+        stack_outputs: CloudFormation stack outputs
+        selected_tests: List of tests to run (None for all tests)
+        marketplace_token: AWS Marketplace registration token
+        debug: Enable debug output
+        email: Email to use for registration
+        product_code: Product code to use
+        customer_id: Customer identifier to use
+        chained_mode: Run tests in a chained flow, passing data between tests
+    """
     config = TEST_CONFIGS[config_name]
     tests_to_run = selected_tests if selected_tests else config["tests"]
     
     results = {}
+    registered_customer_id = None
+    
+    # For chained mode testing, ensure registration is first
+    if chained_mode and "registration" in tests_to_run and tests_to_run[0] != "registration":
+        tests_to_run.remove("registration")
+        tests_to_run.insert(0, "registration")
     
     for test in tests_to_run:
         print(f"\nRunning test: {test}")
@@ -160,17 +181,64 @@ def run_tests(config_name, stack_outputs, selected_tests=None, marketplace_token
         
         if test_module and hasattr(test_module, 'run_test'):
             try:
+                # For chained mode testing, use the customer ID and product code from registration
+                if chained_mode and test != "registration" and registered_customer_id:
+                    customer_id = registered_customer_id
+                    print(f"Using customer ID from registration: {customer_id}")
+                
                 # Pass marketplace_token to registration test
-                if test == "registration" and marketplace_token:
-                    results[test] = test_module.run_test(stack_outputs, marketplace_token, debug, config_name, email, product_code)
+                if test == "registration":
+                    # If chained mode testing and no token provided, prompt for one
+                    if chained_mode and not marketplace_token:
+                        marketplace_token = input("Enter AWS Marketplace registration token (leave empty for simulated test): ")
+                    
+                    # Run the registration test
+                    if marketplace_token:
+                        results[test] = test_module.run_test(stack_outputs, marketplace_token, debug, config_name, email, product_code)
+                    else:
+                        results[test] = test_module.run_test(stack_outputs, debug=debug, config_name=config_name, registration_email=email, override_product_code=product_code)
+                    
+                    # For chained mode testing, extract the customer ID from the result
+                    if chained_mode and results[test] and hasattr(test_module, 'get_customer_id'):
+                        registered_customer_id = test_module.get_customer_id()
+                        print(f"Extracted customer ID from registration: {registered_customer_id}")
+                elif test == "multi_product":
+                    # Pass second_product_code to multi_product test
+                    second_product_code = getattr(args, 'second_product_code', None)
+                    results[test] = test_module.run_test(stack_outputs, debug=debug, config_name=config_name, registration_email=email, override_product_code=product_code, customer_id=customer_id, second_product_code=second_product_code)
                 else:
                     results[test] = test_module.run_test(stack_outputs, debug=debug, config_name=config_name, registration_email=email, override_product_code=product_code, customer_id=customer_id)
             except Exception as e:
                 print(f"ERROR: Test {test} failed with exception: {e}")
                 results[test] = False
+                
+                # For chained mode testing, stop if a test fails
+                if chained_mode:
+                    print("Stopping chained testing due to test failure")
+                    break
         else:
             print(f"Test '{test}' not implemented yet")
             results[test] = None
+    
+    # Print a summary of the test results
+    print("\n=== Test Results Summary ===")
+    for test, result in results.items():
+        status = "PASS" if result else "NOT IMPLEMENTED" if result is None else "FAIL"
+        print(f"{test}: {status}")
+    
+    # Calculate overall pass rate
+    total_tests = len(results)
+    passed_tests = sum(1 for result in results.values() if result)
+    not_implemented = sum(1 for result in results.values() if result is None)
+    failed_tests = total_tests - passed_tests - not_implemented
+    
+    if total_tests > 0:
+        pass_rate = (passed_tests / (total_tests - not_implemented)) * 100 if (total_tests - not_implemented) > 0 else 0
+        print(f"\nPass rate: {pass_rate:.1f}% ({passed_tests}/{total_tests - not_implemented})")
+        print(f"Tests passed: {passed_tests}")
+        print(f"Tests failed: {failed_tests}")
+        if not_implemented > 0:
+            print(f"Tests not implemented: {not_implemented}")
     
     return results
 
@@ -202,7 +270,7 @@ def main():
             stack_outputs = deploy_stack(args.config, args.config_dir)
             print(f"Stack {TEST_CONFIGS[args.config]['stack_name']} deployed successfully")
         
-        # Run tests only if --tests is specified
+        # Run tests if --tests is specified
         if args.tests:
             # Handle 'all' as a special case
             if 'all' in args.tests:
@@ -210,10 +278,13 @@ def main():
             else:
                 tests_to_run = args.tests
             
+            # If running all tests, automatically enable chained mode
+            chained_mode = (tests_to_run is None)
+            
             # Prompt for test-specific parameters
             test_params = {}
             for test in tests_to_run if tests_to_run else TEST_CONFIGS[args.config]["tests"]:
-                test_params[test] = prompt_utils.prompt_for_test_parameters(test, args.config, args.config_dir, stack_outputs, args.marketplace_token)
+                test_params[test] = prompt_utils.prompt_for_test_parameters(test, args.config, args.config_dir, stack_outputs, args.marketplace_token, chained_mode)
                 
             # Override command line arguments with prompted values
             if "registration" in test_params and test_params["registration"]:
@@ -225,15 +296,17 @@ def main():
                     args.marketplace_token = test_params["registration"]["marketplace_token"]
             
             # Override customer_id for all tests that need it
-            for test_type in ["entitlement", "subscription", "metering", "grant_revoke"]:
+            for test_type in ["entitlement", "subscription", "metering", "grant_revoke", "multi_product"]:
                 if test_type in test_params and test_params[test_type]:
                     if test_params[test_type].get("customer_id") and not args.customer_id:
                         args.customer_id = test_params[test_type]["customer_id"]
                     if test_params[test_type].get("product_code") and not args.product_code:
                         args.product_code = test_params[test_type]["product_code"]
+                    if test_type == "multi_product" and test_params[test_type].get("second_product_code") and not args.second_product_code:
+                        args.second_product_code = test_params[test_type]["second_product_code"]
             
             # Run tests
-            test_results = run_tests(args.config, stack_outputs, tests_to_run, args.marketplace_token, args.debug, args.email, args.product_code, args.customer_id)
+            test_results = run_tests(args.config, stack_outputs, tests_to_run, args.marketplace_token, args.debug, args.email, args.product_code, args.customer_id, chained_mode)
             
             # Print results
             print("\n=== Test Results ===")

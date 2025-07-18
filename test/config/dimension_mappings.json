@@ -1,0 +1,7 @@
+{
+  "dimension_mappings": {
+    "dimension_1_id": "metered_1_id",
+    "dimension_2_id": "metered_2_id",
+    "dimension_3_id": "metered_3_id"
+  }
+}

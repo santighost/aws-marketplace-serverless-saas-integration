@@ -19,6 +19,13 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from utils import aws_utils
 
 
+# Global variable to store the customer ID from registration
+_registered_customer_id = None
+
+def get_customer_id():
+    """Get the customer ID from the last registration"""
+    return _registered_customer_id
+
 # Add command-line interface for direct testing with a token
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Test AWS Marketplace registration flow")
@@ -323,6 +330,10 @@ def test_real_registration(api_url, table, marketplace_token, product_code, debu
                 customer_id = resolve_response.get('CustomerIdentifier')
                 print(f"Resolved customer identifier: {customer_id}")
                 
+                # Store the customer ID for comprehensive testing
+                global _registered_customer_id
+                _registered_customer_id = customer_id
+                
                 # Get the product code from the resolve_customer response
                 response_product_code = resolve_response.get('ProductCode')
                 print(f"Product code from resolve_customer: {response_product_code}")
@@ -436,6 +447,10 @@ def test_simulated_registration(table, product_code, seller_email="test@example.
     print("\nTesting registration with simulated data...")
     
     customer_id = f"test-customer-{uuid.uuid4().hex[:8]}"
+    
+    # Store the customer ID for comprehensive testing
+    global _registered_customer_id
+    _registered_customer_id = customer_id
     
     # Create a test customer record with multi-product format matching UI format
     try:

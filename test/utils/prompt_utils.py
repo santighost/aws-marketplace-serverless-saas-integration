@@ -179,7 +179,7 @@ def prompt_for_deployment_parameters(config_name, config_dir):
     
     return parameters
 
-def prompt_for_test_parameters(test_name, config_name, config_dir, stack_outputs=None, marketplace_token=None):
+def prompt_for_test_parameters(test_name, config_name, config_dir, stack_outputs=None, marketplace_token=None, chained_mode=False):
     """Prompt for test-specific parameters"""
     config_path = os.path.join(config_dir, f"samconfig.{config_name}.toml")
     params = load_config_parameters(config_path)
@@ -231,14 +231,17 @@ def prompt_for_test_parameters(test_name, config_name, config_dir, stack_outputs
     elif test_name == "entitlement":
         print(f"Configuring parameters for entitlement test:")
         
-        # Prompt for customer identifier
-        customer_id = prompt_for_optional_parameter("Specify customer identifier (leave empty to create a test customer)", "")
+        # Prompt for customer identifier (skip in chained mode)
+        customer_id = None
+        if not chained_mode:
+            customer_id = prompt_for_optional_parameter("Specify customer identifier (leave empty to create a test customer)", "")
         
-        # Prompt for product code
+        # Prompt for product code (skip in chained mode)
         product_code = None
         if stack_outputs and "ProductCode" in stack_outputs:
             product_code = stack_outputs["ProductCode"]
-        product_code = prompt_for_parameter("Specify product code", product_code)
+        if not chained_mode:
+            product_code = prompt_for_parameter("Specify product code", product_code)
         
         return {
             "customer_id": customer_id if customer_id else None,
@@ -248,14 +251,17 @@ def prompt_for_test_parameters(test_name, config_name, config_dir, stack_outputs
     elif test_name == "subscription":
         print(f"Configuring parameters for subscription test:")
         
-        # Prompt for customer identifier
-        customer_id = prompt_for_optional_parameter("Specify customer identifier (leave empty to create a test customer)", "")
+        # Prompt for customer identifier (skip in chained mode)
+        customer_id = None
+        if not chained_mode:
+            customer_id = prompt_for_optional_parameter("Specify customer identifier (leave empty to create a test customer)", "")
         
-        # Prompt for product code
+        # Prompt for product code (skip in chained mode)
         product_code = None
         if stack_outputs and "ProductCode" in stack_outputs:
             product_code = stack_outputs["ProductCode"]
-        product_code = prompt_for_parameter("Specify product code", product_code)
+        if not chained_mode:
+            product_code = prompt_for_parameter("Specify product code", product_code)
         
         return {
             "customer_id": customer_id if customer_id else None,
@@ -265,14 +271,17 @@ def prompt_for_test_parameters(test_name, config_name, config_dir, stack_outputs
     elif test_name == "metering":
         print(f"Configuring parameters for metering test:")
         
-        # Prompt for customer identifier
-        customer_id = prompt_for_optional_parameter("Specify customer identifier (leave empty to create a test customer)", "")
+        # Prompt for customer identifier (skip in chained mode)
+        customer_id = None
+        if not chained_mode:
+            customer_id = prompt_for_optional_parameter("Specify customer identifier (leave empty to create a test customer)", "")
         
-        # Prompt for product code
+        # Prompt for product code (skip in chained mode)
         product_code = None
         if stack_outputs and "ProductCode" in stack_outputs:
             product_code = stack_outputs["ProductCode"]
-        product_code = prompt_for_parameter("Specify product code", product_code)
+        if not chained_mode:
+            product_code = prompt_for_parameter("Specify product code", product_code)
         
         return {
             "customer_id": customer_id if customer_id else None,
@@ -282,18 +291,45 @@ def prompt_for_test_parameters(test_name, config_name, config_dir, stack_outputs
     elif test_name == "grant_revoke":
         print(f"Configuring parameters for grant/revoke access test:")
         
-        # Prompt for customer identifier
-        customer_id = prompt_for_optional_parameter("Specify customer identifier (leave empty to create a test customer)", "")
+        # Prompt for customer identifier (skip in chained mode)
+        customer_id = None
+        if not chained_mode:
+            customer_id = prompt_for_optional_parameter("Specify customer identifier (leave empty to create a test customer)", "")
         
-        # Prompt for product code
+        # Prompt for product code (skip in chained mode)
         product_code = None
         if stack_outputs and "ProductCode" in stack_outputs:
             product_code = stack_outputs["ProductCode"]
-        product_code = prompt_for_parameter("Specify product code", product_code)
+        if not chained_mode:
+            product_code = prompt_for_parameter("Specify product code", product_code)
         
         return {
             "customer_id": customer_id if customer_id else None,
             "product_code": product_code if product_code else None
+        }
+    
+    elif test_name == "multi_product":
+        print(f"Configuring parameters for multi-product test:")
+        
+        # Prompt for customer identifier (skip in chained mode)
+        customer_id = None
+        if not chained_mode:
+            customer_id = prompt_for_optional_parameter("Specify customer identifier (leave empty to create a test customer)", "")
+        
+        # Prompt for primary product code (skip in chained mode)
+        product_code = None
+        if stack_outputs and "ProductCode" in stack_outputs:
+            product_code = stack_outputs["ProductCode"]
+        if not chained_mode:
+            product_code = prompt_for_parameter("Specify primary product code", product_code)
+        
+        # Always prompt for secondary product code
+        second_product_code = prompt_for_parameter("Specify secondary product code", "")
+        
+        return {
+            "customer_id": customer_id if customer_id else None,
+            "product_code": product_code if product_code else None,
+            "second_product_code": second_product_code
         }
     
     return {}

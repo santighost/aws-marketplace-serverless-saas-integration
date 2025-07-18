@@ -9,6 +9,7 @@ import time
 import sys
 import os
 from datetime import datetime, timedelta
+import pathlib
 
 # Add parent directory to path to import utils
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -110,6 +111,20 @@ def run_test(stack_outputs, debug=False, config_name="contracts_with_subscriptio
     # Create metering records
     print("\nCreating metering records...")
     
+    # Load dimension mappings from config file
+    dimension_mappings = {}
+    try:
+        config_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 
+                                 "config", "dimension_mappings.json")
+        if os.path.exists(config_path):
+            with open(config_path, 'r') as f:
+                config_data = json.load(f)
+                dimension_mappings = config_data.get("dimension_mappings", {})
+                if dimension_mappings:
+                    print(f"Loaded dimension mappings from config: {dimension_mappings}")
+    except Exception as e:
+        print(f"Failed to load dimension mappings: {e}")
+    
     # For test customers, use default test dimensions
     if is_test_customer:
         print("Using default test dimensions for test customer")
@@ -124,8 +139,19 @@ def run_test(stack_outputs, debug=False, config_name="contracts_with_subscriptio
             }
         ]
     else:
-        # For real customers, try to get dimensions from existing entitlements
-        dimensions = []
+        # For real customers, use the actual metering dimensions
+        print("Using actual metering dimensions for real customer")
+        dimensions = [
+            {
+                "dimension": "metered_1_id",
+                "value": 1
+            }
+        ]
+        print(f"Using metering dimension: metered_1_id")
+        
+        # Try to get dimensions from entitlements and map them
+        mapped_dimensions = []
+        entitlement_dimensions = []
         try:
             # Check if the customer has entitlements
             if "entitlement" in response.get("Item", {}):
@@ -134,19 +160,28 @@ def run_test(stack_outputs, debug=False, config_name="contracts_with_subscriptio
                     # Extract dimensions from entitlements
                     for entitlement in entitlement_data["Entitlements"]:
                         if "Dimension" in entitlement:
-                            dimensions.append({
-                                "dimension": entitlement["Dimension"],
-                                "value": 1  # Use a small value for testing
-                            })
-                            print(f"Using dimension from entitlement: {entitlement['Dimension']}")
+                            entitlement_dim = entitlement["Dimension"]
+                            entitlement_dimensions.append(entitlement_dim)
+                            print(f"Found entitlement dimension: {entitlement_dim}")
+                            
+                            # Map entitlement dimension to metering dimension
+                            if dimension_mappings and entitlement_dim in dimension_mappings:
+                                metering_dim = dimension_mappings[entitlement_dim]
+                                mapped_dimensions.append({
+                                    "dimension": metering_dim,
+                                    "value": 1  # Use a small value for testing
+                                })
+                                print(f"Mapped entitlement dimension {entitlement_dim} to metering dimension {metering_dim}")
+            
+            # If we found mapped dimensions, use them instead of the default
+            if mapped_dimensions:
+                dimensions = mapped_dimensions
+                print("Using mapped dimensions from entitlements")
+                    
+            print("Note: Entitlement dimensions are different from metering dimensions")
+            print("Entitlement dimensions are used for contracts, metering dimensions for usage billing")
         except Exception as e:
             print(f"Failed to get dimensions from entitlements: {e}")
-        
-        # For real customers, fail if no dimensions found
-        if not dimensions:
-            print("ERROR: No dimensions found for real customer. Cannot proceed with metering test.")
-            print("Please ensure the customer has entitlements with dimensions configured.")
-            return False
     
     # Create a metering record
     try:
@@ -236,7 +271,17 @@ def run_test(stack_outputs, debug=False, config_name="contracts_with_subscriptio
             print("Metering record was processed but failed with error:")
             if debug and "metering_response" in item:
                 print(f"Error: {item['metering_response']}")
-            print("This is expected for test customers with invalid dimensions")
+            
+            # For real customers, metering failures should cause the test to fail
+            if not is_test_customer:
+                print("ERROR: Metering failed for real customer. This indicates a configuration issue.")
+                print("Check that your AWS Marketplace product has the correct metering dimensions configured.")
+                print("The dimensions from entitlements may not be valid for metering. You may need to use different dimensions.")
+                print("Entitlement dimensions: " + ", ".join([d["dimension"] for d in dimensions]))
+                print("Suggested fix: Configure metering dimensions in AWS Marketplace or use a dimension mapping.")
+                return False
+            else:
+                print("This is expected for test customers with invalid dimensions")
         else:
             print("Metering record was processed successfully")
         
