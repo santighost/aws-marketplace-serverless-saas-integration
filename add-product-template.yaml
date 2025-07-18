@@ -1,0 +1,609 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'Add a new product to an existing AWS Marketplace Serverless SaaS Integration deployment'
+
+Parameters:
+  NewProductId:
+    Type: String
+    Description: Product ID for the new AWS Marketplace product
+    
+  EntitlementSQSQueueARN:
+    Type: String
+    Description: ARN of the existing entitlement SQS queue (e.g., arn:aws:sqs:region:account-id:queue-name)
+    
+  SubscriptionSQSQueueARN:
+    Type: String
+    Description: ARN of the existing subscription SQS queue (e.g., arn:aws:sqs:region:account-id:queue-name)
+    
+  ExistingFulfillmentURL:
+    Type: String
+    Description: Existing fulfillment URL (only used if not creating a new landing page)
+    
+  ProductType:
+    Type: String
+    Description: Type of SaaS listing for the new product
+    AllowedValues:
+      - contracts
+      - subscriptions
+      - contracts_with_subscription
+    Default: contracts_with_subscription
+    
+  CreateNewLandingPage:
+    Type: String
+    Description: Whether to create a new landing page for the new product
+    AllowedValues:
+      - 'true'
+      - 'false'
+    Default: 'false'
+    
+  NewLandingPageS3BucketName:
+    Type: String
+    Description: Name for the S3 bucket to host the new landing page (only required if creating a new landing page)
+    Default: ''
+    
+  UpdateFulfillmentURL:
+    Type: String
+    Description: Whether to automatically update the fulfillment URL in AWS Marketplace
+    AllowedValues:
+      - 'true'
+      - 'false'
+    Default: 'false'
+
+Conditions:
+  UpdateFulfillmentURLCondition: !Equals [!Ref UpdateFulfillmentURL, 'true']
+  CreateNewLandingPageCondition: !Equals [!Ref CreateNewLandingPage, 'true']
+  IsContractsOrBoth: !Or [!Equals [!Ref ProductType, 'contracts'], !Equals [!Ref ProductType, 'contracts_with_subscription']]
+  IsSubscriptionsOrBoth: !Or [!Equals [!Ref ProductType, 'subscriptions'], !Equals [!Ref ProductType, 'contracts_with_subscription']]
+
+Resources:
+  # Get the product code from the product ID
+  GetProductCode:
+    Type: Custom::Lambda
+    Properties:
+      ServiceToken: !GetAtt GetProductCodeCustomResource.Arn
+      ProductId: !Ref NewProductId
+      
+  GetProductCodeCustomResource:
+    Type: AWS::Lambda::Function
+    Properties:
+      Role: !GetAtt CAPILambdasExecutionRole.Arn
+      Runtime: nodejs22.x
+      Handler: index.handler
+      Code: 
+        ZipFile: |
+          const { MarketplaceCatalogClient, DescribeEntityCommand } = require("@aws-sdk/client-marketplace-catalog");
+          const response = require('cfn-response');
+          exports.handler = async (event, context) => {
+          context.callbackWaitsForEmptyEventLoop = true;
+            console.log("REQUEST RECEIVED:\n" + JSON.stringify(event));
+            const client = new MarketplaceCatalogClient({ region: 'us-east-1' });
+            const productId = event.ResourceProperties.ProductId; // Assuming the product ID is passed as an event parameter
+
+            try {
+                if (event.RequestType === 'Create' || event.RequestType === 'Update') {
+                    // Fetch the product details from AWS Marketplace
+                    const command = new DescribeEntityCommand({
+                        Catalog: 'AWSMarketplace',
+                        EntityId: productId,
+                        EntityType: 'Product'
+                    });
+                    const resp = await client.send(command);
+
+                    // Extract the product code from the response
+                    const productCode = resp.DetailsDocument.Description.ProductCode;
+
+                    const responseData = {
+                        ProductCode: productCode
+                    };
+
+                    await response.send(event, context, 'SUCCESS', responseData);
+                } else if (event.RequestType === 'Delete') {
+                    // No action needed for delete
+                    await response.send(event, context, 'SUCCESS', {});
+                } else {
+                    await response.send(event, context, 'FAILED', { error: 'Invalid request type' });
+                }
+            } catch (error) {
+                console.error('Error:', error);
+                await response.send(event, context, 'FAILED', { error: 'Failed to fetch product code' });
+            }
+          };
+
+  # SNS Subscriptions for the new product
+  EntitlementSNSSubscription:
+    Type: AWS::SNS::Subscription
+    Condition: IsContractsOrBoth
+    Properties:
+      Protocol: sqs
+      TopicArn: !Sub 'arn:aws:sns:${AWS::Region}:287250355862:aws-mp-entitlement-notification-${GetProductCode.ProductCode}'
+      Endpoint: !Ref EntitlementSQSQueueARN
+      RawMessageDelivery: false
+      
+  SubscriptionSNSSubscription:
+    Type: AWS::SNS::Subscription
+    Condition: IsSubscriptionsOrBoth
+    Properties:
+      Protocol: sqs
+      TopicArn: !Sub 'arn:aws:sns:${AWS::Region}:287250355862:aws-mp-subscription-notification-${GetProductCode.ProductCode}'
+      Endpoint: !Ref SubscriptionSQSQueueARN
+      RawMessageDelivery: false
+
+  # New landing page resources (if selected)
+  NewLandingPageBucket:
+    Type: AWS::S3::Bucket
+    Condition: CreateNewLandingPageCondition
+    Properties:
+      BucketName: !Ref NewLandingPageS3BucketName
+      WebsiteConfiguration:
+        IndexDocument: index.html
+        ErrorDocument: error.html
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: false
+        BlockPublicPolicy: false
+        IgnorePublicAcls: false
+        RestrictPublicBuckets: false
+
+  NewLandingPageBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Condition: CreateNewLandingPageCondition
+    Properties:
+      Bucket: !Ref NewLandingPageBucket
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal: '*'
+            Action: 's3:GetObject'
+            Resource: !Sub '${NewLandingPageBucket.Arn}/*'
+
+  NewLandingPageCloudFrontDistribution:
+    Type: AWS::CloudFront::Distribution
+    Condition: CreateNewLandingPageCondition
+    Properties:
+      DistributionConfig:
+        Origins:
+          - DomainName: !GetAtt NewLandingPageBucket.RegionalDomainName
+            Id: S3Origin
+            S3OriginConfig:
+              OriginAccessIdentity: ''
+        Enabled: true
+        DefaultRootObject: index.html
+        DefaultCacheBehavior:
+          TargetOriginId: S3Origin
+          ViewerProtocolPolicy: redirect-to-https
+          AllowedMethods:
+            - GET
+            - HEAD
+            - OPTIONS
+            - PUT
+            - POST
+            - PATCH
+            - DELETE
+          CachedMethods:
+            - GET
+            - HEAD
+            - OPTIONS
+          ForwardedValues:
+            QueryString: true
+            Cookies:
+              Forward: none
+        PriceClass: PriceClass_100
+        ViewerCertificate:
+          CloudFrontDefaultCertificate: true
+
+  # Lambda function to deploy content to the landing page
+  S3ContentCustomResource:
+    Type: AWS::Lambda::Function
+    Condition: CreateNewLandingPageCondition
+    Properties:
+      Handler: index.handler
+      Role: !GetAtt S3ContentCustomResourceRole.Arn
+      Runtime: nodejs22.x
+      Timeout: 60
+      Code:
+        ZipFile: |
+          const AWS = require('aws-sdk');
+          const response = require('cfn-response');
+          
+          exports.handler = async (event, context) => {
+            console.log('Event:', JSON.stringify(event, null, 2));
+            
+            if (event.RequestType === 'Delete') {
+              return response.send(event, context, response.SUCCESS);
+            }
+            
+            try {
+              const { BucketName, ProductCode, ApiEndpoint } = event.ResourceProperties;
+              
+              const s3 = new AWS.S3();
+              
+              // HTML content
+              const htmlContent = `
+              <!DOCTYPE html>
+              <html lang="en">
+              <head>
+                <meta charset="UTF-8">
+                <meta name="viewport" content="width=device-width, initial-scale=1.0">
+                <title>AWS Marketplace Registration</title>
+                <link rel="stylesheet" href="style.css">
+                <link rel="icon" href="favicon.ico">
+              </head>
+              <body>
+                <div class="container">
+                  <div class="header">
+                    <img src="logo.png" alt="Logo" class="logo">
+                    <h1>Welcome to Product ${ProductCode}</h1>
+                  </div>
+                  <div class="content">
+                    <p>Thank you for subscribing to our product through AWS Marketplace!</p>
+                    <p>Please complete the registration form below to set up your account.</p>
+                    <form id="registrationForm">
+                      <div class="form-group">
+                        <label for="companyName">Company Name</label>
+                        <input type="text" id="companyName" name="companyName" required>
+                      </div>
+                      <div class="form-group">
+                        <label for="contactPerson">Contact Person</label>
+                        <input type="text" id="contactPerson" name="contactPerson" required>
+                      </div>
+                      <div class="form-group">
+                        <label for="contactEmail">Contact Email</label>
+                        <input type="email" id="contactEmail" name="contactEmail" required>
+                      </div>
+                      <div class="form-group">
+                        <label for="contactPhone">Contact Phone</label>
+                        <input type="tel" id="contactPhone" name="contactPhone" required>
+                      </div>
+                      <input type="hidden" id="regToken" name="regToken">
+                      <button type="submit" class="btn">Register</button>
+                    </form>
+                  </div>
+                  <div class="footer">
+                    <p>&copy; 2023 AWS Marketplace SaaS Integration</p>
+                  </div>
+                </div>
+                <script src="script.js"></script>
+              </body>
+              </html>
+              `;
+              
+              // CSS content
+              const cssContent = `
+              body {
+                font-family: Arial, sans-serif;
+                line-height: 1.6;
+                margin: 0;
+                padding: 0;
+                background-color: #f4f4f4;
+              }
+              
+              .container {
+                width: 80%;
+                max-width: 800px;
+                margin: 2rem auto;
+                background-color: #fff;
+                padding: 2rem;
+                box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
+                border-radius: 5px;
+              }
+              
+              .header {
+                text-align: center;
+                margin-bottom: 2rem;
+              }
+              
+              .logo {
+                max-width: 200px;
+                margin-bottom: 1rem;
+              }
+              
+              .content {
+                margin-bottom: 2rem;
+              }
+              
+              .form-group {
+                margin-bottom: 1rem;
+              }
+              
+              label {
+                display: block;
+                margin-bottom: 0.5rem;
+                font-weight: bold;
+              }
+              
+              input {
+                width: 100%;
+                padding: 0.5rem;
+                border: 1px solid #ddd;
+                border-radius: 3px;
+              }
+              
+              .btn {
+                display: inline-block;
+                background-color: #ff9900;
+                color: #fff;
+                padding: 0.7rem 1.5rem;
+                border: none;
+                border-radius: 3px;
+                cursor: pointer;
+                font-size: 1rem;
+              }
+              
+              .btn:hover {
+                background-color: #e88b00;
+              }
+              
+              .footer {
+                text-align: center;
+                margin-top: 2rem;
+                color: #666;
+              }
+              `;
+              
+              // JavaScript content
+              const jsContent = `
+              document.addEventListener('DOMContentLoaded', function() {
+                // Get the token from the URL
+                const urlParams = new URLSearchParams(window.location.search);
+                const token = urlParams.get('x-amzn-marketplace-token');
+                
+                if (token) {
+                  document.getElementById('regToken').value = token;
+                }
+                
+                // Handle form submission
+                document.getElementById('registrationForm').addEventListener('submit', function(e) {
+                  e.preventDefault();
+                  
+                  const formData = {
+                    companyName: document.getElementById('companyName').value,
+                    contactPerson: document.getElementById('contactPerson').value,
+                    contactEmail: document.getElementById('contactEmail').value,
+                    contactPhone: document.getElementById('contactPhone').value,
+                    regToken: document.getElementById('regToken').value
+                  };
+                  
+                  // Submit the form data to the API
+                  fetch('${ApiEndpoint}/subscriber', {
+                    method: 'POST',
+                    headers: {
+                      'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(formData)
+                  })
+                  .then(response => response.text())
+                  .then(data => {
+                    alert('Registration successful! ' + data);
+                    document.getElementById('registrationForm').reset();
+                  })
+                  .catch(error => {
+                    console.error('Error:', error);
+                    alert('An error occurred during registration. Please try again.');
+                  });
+                });
+              });
+              `;
+              
+              // Upload the files to S3
+              await Promise.all([
+                s3.putObject({
+                  Bucket: BucketName,
+                  Key: 'index.html',
+                  Body: htmlContent,
+                  ContentType: 'text/html'
+                }).promise(),
+                
+                s3.putObject({
+                  Bucket: BucketName,
+                  Key: 'style.css',
+                  Body: cssContent,
+                  ContentType: 'text/css'
+                }).promise(),
+                
+                s3.putObject({
+                  Bucket: BucketName,
+                  Key: 'script.js',
+                  Body: jsContent,
+                  ContentType: 'application/javascript'
+                }).promise(),
+                
+                // Upload a placeholder logo and favicon
+                s3.putObject({
+                  Bucket: BucketName,
+                  Key: 'logo.png',
+                  Body: Buffer.from('iVBORw0KGgoAAAANSUhEUgAAASwAAAEsCAYAAAB5fY51AAAABmJLR0QA/wD/AP+gvaeTAAAACXBIWXMAAAsTAAALEwEAmpwYAAAAB3RJTUUH4QIJBywfp3IOswAAAB1pVFh0Q29tbWVudAAAAAAAQ3JlYXRlZCB3aXRoIEdJTVBkLmUHAAABSElEQVR42u3BAQEAAACCIP+vbkhAAQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAB8A/mAAAHxOd3UAAAAAElFTkSuQmCC', 'base64'),
+                  ContentType: 'image/png'
+                }).promise(),
+                
+                s3.putObject({
+                  Bucket: BucketName,
+                  Key: 'favicon.ico',
+                  Body: Buffer.from('AAABAAEAEBAAAAEAIABoBAAAFgAAACgAAAAQAAAAIAAAAAEAIAAAAAAAAAQAABILAAASCwAAAAAAAAAAAAD///8A////AP///wD///8A////AP///wD///8A////AP///wD///8A////AP///wD///8A////AP///wD///8A////AP///wD///8A////AP///wD///8A////AP///wD///8A////AP///wD///8A////AP///wD///8A////AP///wD///8A////AP///wD///8A////AP///wD///8A////AP///wD///8A////AP///wD///8A////AP///wD///8A////AP///wD///8A////AP///wD///8A////AP///wD///8A////AP///wD///8A////AP///wD///8A////AP///wD///8A////AP///wD///8A////AP///wD///8A////AP///wD///8A////AP///wD///8A////AP///wD///8A////AP///wD///8A////AP///wD///8A////AP///wD///8A////AP///wD///8A////AP///wD///8A////AP///wD///8A////AP///wD///8A////AP///wD///8A////AP///wD///8A////AP///wD///8A////AP///wD///8A////AP///wD///8A////AP///wD///8A////AP///wD///8A////AP///wD///8A////AP///wD///8A////AP///wD///8A////AP///wD///8A////AP///wD///8A////AP///wD///8A////AP///wD///8A////AP///wD///8A////AP///wD///8A////AP///wD///8A////AP///wD///8A////AP///wD///8A////AP///wD///8A////AP///wD///8A////AP///wD///8A////AP///wD///8A////AP///wD///8A////AP///wD///8A////AP///wD///8A////AP///wD///8A////AP///wD///8A////AP///wD///8A////AP///wD///8A////AP///wD///8A////AP///wD///8A////AP///wD///8A////AP///wD///8A////AP///wD///8A////AP///wD///8A////AP///wD///8A////AP///wD///8A////AP///wD///8A////AP///wD///8A////AP///wD///8A////AP///wD///8A////AP///wD///8A////AP///wD///8A////AP///wD///8A////AP///wD///8A////AP///wD///8A////AP///wD///8A////AP///wD///8A////AP///wD///8A////AP///wD///8A////AP///wD///8A////AP///wD///8A////AP///wD///8A////AP///wD///8A////AP///wD///8A////AP///wD///8A////AP///wD///8A////AP///wD///8A////AP///wD///8A////AP///wD///8A////AP///wD///8A////AP///wD///8A////AP///wD///8A////AP///wD///8A////AP///wD///8A//8AAP//AAD//wAA//8AAP//AAD//wAA//8AAP//AAD//wAA//8AAP//AAD//wAA//8AAP//AAD//wAA//8AAA==', 'base64'),
+                  ContentType: 'image/x-icon'
+                }).promise()
+              ]);
+              
+              return response.send(event, context, response.SUCCESS, {
+                BucketName,
+                ApiEndpoint
+              });
+            } catch (error) {
+              console.error('Error:', error);
+              return response.send(event, context, response.FAILED, { Error: error.message });
+            }
+          };
+
+  S3ContentCustomResourceRole:
+    Type: AWS::IAM::Role
+    Condition: CreateNewLandingPageCondition
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: S3Access
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:PutObject
+                Resource: !Sub '${NewLandingPageBucket.Arn}/*'
+
+  DeployS3Content:
+    Type: Custom::S3Content
+    Condition: CreateNewLandingPageCondition
+    Properties:
+      ServiceToken: !GetAtt S3ContentCustomResource.Arn
+      BucketName: !Ref NewLandingPageBucket
+      ProductCode: !GetAtt GetProductCode.ProductCode
+      ApiEndpoint: !Sub "https://${NewLandingPageCloudFrontDistribution.DomainName}/redirectmarketplacetoken"
+
+  # Update fulfillment URL in AWS Marketplace
+  FulfillmentURL:
+    Type: Custom::Lambda
+    Condition: UpdateFulfillmentURLCondition
+    Properties:
+      ServiceToken: !GetAtt UpdateFulfillmentURLCustomResource.Arn
+      ProductId: !Ref NewProductId
+      FulfillmentUrl: !If [
+                        CreateNewLandingPageCondition,
+                        !Sub "https://${NewLandingPageCloudFrontDistribution.DomainName}/redirectmarketplacetoken",
+                        !Ref ExistingFulfillmentURL
+                      ]
+
+  UpdateFulfillmentURLCustomResource:
+    Type: AWS::Lambda::Function
+    Properties:
+      Role: !GetAtt CAPILambdasExecutionRole.Arn
+      Runtime: nodejs22.x
+      Handler: index.handler
+      Code: 
+        ZipFile: |
+          const { MarketplaceCatalogClient, DescribeEntityCommand, StartChangeSetCommand } = require("@aws-sdk/client-marketplace-catalog");
+          const response = require('cfn-response');
+          exports.handler = async (event, context) => {
+            console.log("REQUEST RECEIVED:\n" + JSON.stringify(event));
+            const client = new MarketplaceCatalogClient({ region: 'us-east-1' });
+            const productId = event.ResourceProperties.ProductId;
+            const fulfillmentUrl = event.ResourceProperties.FulfillmentUrl;
+            try {
+              if (event.RequestType === 'Create' || event.RequestType === 'Update') {
+                    // Fetch the fulfillment url id to be able to update the fulfillment url
+                    let command = new DescribeEntityCommand({
+                        Catalog: 'AWSMarketplace',
+                        EntityId: productId,
+                        EntityType: 'Product'
+                    });
+                    let resp = await client.send(command);
+                    console.debug("DescribeEntityCommand:\n" + JSON.stringify(resp));
+                    
+                    
+                    const fulfillmentUrlID = resp.DetailsDocument.Versions[0].DeliveryOptions[0].Id
+                    console.debug("FullfilmentId:\n" + fulfillmentUrlID);
+                    
+                    const details = { 
+                      DeliveryOptions : [{
+                        Id: fulfillmentUrlID,
+                        Details: {
+                          SaaSUrlDeliveryOptionDetails: {
+                            FulfillmentUrl: fulfillmentUrl
+                          }
+                        }
+                      }]
+                    };
+                    console.debug("details:\n" + JSON.stringify(details));
+                    
+                    const startChangeSetInput = { 
+                      Catalog: 'AWSMarketplace',
+                      ChangeSet: [ 
+                        { 
+                          ChangeType: 'UpdateDeliveryOptions',
+                          Entity: {
+                            Identifier: productId,
+                            Type: 'SaaSProduct@1.0'
+                          },
+                          Details: JSON.stringify(details)
+                        }
+                      ]
+                    };
+                    console.debug("startChangeSetInput:\n" + JSON.stringify(startChangeSetInput));
+                    
+                    command = new StartChangeSetCommand(startChangeSetInput);
+                    resp = await client.send(command);
+                    console.debug("StartChangeSetResp: \n" + JSON.stringify(resp));
+
+                    const responseData = {
+                        StartChangeSetResp: JSON.stringify(resp)
+                    };
+
+                    await response.send(event, context, 'SUCCESS', responseData);
+                } else if (event.RequestType === 'Delete') {
+                    // No action needed for delete
+                    await response.send(event, context, 'SUCCESS', {});
+                } else {
+                    await response.send(event, context, 'FAILED', { error: 'Invalid request type' });
+                }
+            } catch (error) {
+                console.error('Error:', error);
+                await response.send(event, context, 'FAILED', { error: 'Failed to update fulfillment url' });
+            }
+          };
+
+  CAPILambdasExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+            Action:
+              - 'sts:AssumeRole'
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: manage-products
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - "aws-marketplace:StartChangeSet"
+                  - "aws-marketplace:DescribeEntity"
+                  - "aws-marketplace:ListEntities"
+                Resource: "*"
+
+Outputs:
+  NewProductCode:
+    Description: Product code for the new AWS Marketplace product
+    Value: !GetAtt GetProductCode.ProductCode
+    
+  FulfillmentURL:
+    Description: The URL that customers will be redirected to after subscribing
+    Value: !If 
+      - CreateNewLandingPageCondition
+      - !Sub 'https://${NewLandingPageCloudFrontDistribution.DomainName}/redirectmarketplacetoken'
+      - !Ref ExistingFulfillmentURL
+    
+  EntitlementSNSSubscriptionARN:
+    Description: ARN of the entitlement SNS subscription
+    Condition: IsContractsOrBoth
+    Value: !Ref EntitlementSNSSubscription
+    
+  SubscriptionSNSSubscriptionARN:
+    Description: ARN of the subscription SNS subscription
+    Condition: IsSubscriptionsOrBoth
+    Value: !Ref SubscriptionSNSSubscription
+    
+  NewLandingPageURL:
+    Description: URL of the new landing page
+    Condition: CreateNewLandingPageCondition
+    Value: !Sub 'https://${NewLandingPageCloudFrontDistribution.DomainName}'
